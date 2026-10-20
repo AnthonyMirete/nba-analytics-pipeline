@@ -193,6 +193,20 @@ def tonight_summary():
     return {"games": props["Game"].nunique(), "first_tip": first.strftime("%I:%M %p").lstrip("0")}
 
 
+def game_lines_table():
+    """FanDuel vs Pinnacle for tonight's moneylines, spreads and totals."""
+    import game_lines
+    previous = os.getcwd()
+    try:
+        os.chdir(FOLDER)
+        table = game_lines.compare(game_lines.load())
+    finally:
+        os.chdir(previous)
+    if not table.empty:
+        table["Tip (ET)"] = table["tip"].dt.tz_convert(EASTERN).dt.strftime("%I:%M %p").str.lstrip("0")
+    return table
+
+
 def clv_summary():
     """Closing line value per group (model picks, model parlay legs, your prop legs)."""
     import clv

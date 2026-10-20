@@ -40,10 +40,12 @@ PROPLINE_MARKETS = [
     "player_points_rebounds_assists", "player_points_rebounds", "player_points_assists",
     "player_rebounds_assists", "player_blocks", "player_steals", "player_turnovers",
 ]
+GAME_MARKETS = ["h2h", "spreads", "totals"]      # moneyline, spread, total (saved to game_lines.csv)
 ODDS_API_MARKETS = ["player_points"]
 ODDS_API_BOOKMAKERS = ["draftkings", "fanduel", "betmgm"]
 
 OUTPUT_FILE = "nba_props.csv"
+GAME_FILE = "game_lines.csv"
 RAW_SAMPLE_FILE = "raw_props_sample.json"   # one raw API answer, kept for checking the format
 
 # ---------------------------------------------------------------------------
@@ -90,7 +92,7 @@ def get_props_for_game(source, key, game_id):
     """Prop lines for one game. Returns the data and how many requests/credits are left."""
     params = {"apiKey": key, "oddsFormat": "american"}
     if source == "propline":
-        params["markets"] = ",".join(PROPLINE_MARKETS)
+        params["markets"] = ",".join(PROPLINE_MARKETS + GAME_MARKETS)
     else:
         params["markets"] = ",".join(ODDS_API_MARKETS)
         params["bookmakers"] = ",".join(ODDS_API_BOOKMAKERS)
@@ -124,6 +126,8 @@ def flatten(game, game_data, captured_at):
     rows = []
     for book in game_data.get("bookmakers", []):
         for market in book.get("markets", []):
+            if market.get("key") in GAME_MARKETS:
+                continue                            # game lines go to game_lines.csv
             for outcome in market.get("outcomes", []):
                 if outcome.get("point") is None:
                     continue                        # skip yes/no style props
@@ -143,6 +147,43 @@ def flatten(game, game_data, captured_at):
                     "line_type": market.get("line_type") or "",   # main / alternate / milestone
                 })
     return rows
+
+
+def flatten_game(game, game_data, captured_at):
+    """Moneyline, spread and total rows: one per book / market / side (full game only)."""
+    rows = []
+    for book in game_data.get("bookmakers", []):
+        for market in book.get("markets", []):
+            if market.get("key") not in GAME_MARKETS:
+                continue
+            for outcome in market.get("outcomes", []):
+                if period_of(market, outcome) not in ("", "full", "full_game", "game"):
+                    continue                        # skip first-half / quarter lines
+                rows.append({
+                    "captured_at_utc": captured_at,
+                    "game_id": game["id"],
+                    "tip_time_utc": game["commence_time"],
+                    "home_team": game_data.get("home_team", game.get("home_team")),
+                    "away_team": game_data.get("away_team", game.get("away_team")),
+                    "bookmaker": book["key"],
+                    "market": market["key"],
+                    "line_type": market.get("line_type") or "",
+                    "selection": outcome.get("name", ""),     # team name, or Over / Under
+                    "point": outcome.get("point", ""),        # spread or total; blank for moneyline
+                    "price": outcome.get("price", ""),
+                })
+    return rows
+
+
+def append_csv(path, rows):
+    if not rows:
+        return
+    new = not os.path.exists(path)
+    with open(path, "a", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        if new:
+            writer.writeheader()
+        writer.writerows(rows)
 
 
 def upgrade_old_file(fieldnames):
@@ -192,10 +233,12 @@ def main():
                 json.dump(data, f, indent=1)
         rows = flatten(game, data, captured_at)
         save_rows(rows)
+        game_rows = flatten_game(game, data, captured_at)
+        append_csv(GAME_FILE, game_rows)
         total_rows += len(rows)
         books = len({r["bookmaker"] for r in rows})
         print(f"  {game.get('away_team')} @ {game.get('home_team')}: "
-              f"{len(rows)} lines from {books} sportsbooks")
+              f"{len(rows)} prop lines from {books} sportsbooks, {len(game_rows)} game lines")
 
     print(f"Done. Saved {total_rows} lines to {OUTPUT_FILE}.")
     print(f"Requests/credits left: {left}")

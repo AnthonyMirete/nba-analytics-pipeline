@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 import save_props
 
 OUTPUT_FILE = "closing_lines.csv"
+GAME_OUTPUT_FILE = "closing_game_lines.csv"      # moneylines, spreads, totals at close
 WINDOW_MINUTES = 20
 
 
@@ -65,7 +66,9 @@ def main():
         for r in rows:
             r["minutes_before_tip"] = round((tip - now).total_seconds() / 60)
         save(rows)
-        print(f"{now:%H:%M} UTC: saved {len(rows)} closing lines for "
+        game_rows = save_props.flatten_game(game, data, captured_at)
+        save_props.append_csv(GAME_OUTPUT_FILE, game_rows)
+        print(f"{now:%H:%M} UTC: saved {len(rows)} closing prop lines and {len(game_rows)} game lines for "
               f"{game.get('away_team')} @ {game.get('home_team')} (requests left: {left})")
 
 

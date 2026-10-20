@@ -32,6 +32,8 @@ Every day at a scheduled time, `daily_run.sh` runs the whole chain:
 | 4 | `simple_model.py` | Projects each player's stat as expected minutes × per-minute rate, adjusted for injured teammates, then blends it with the market consensus |
 | 5b | `closing_lines.py` | Saves every game's prop lines 10-20 minutes before tip-off (runs every 10 minutes) |
 | 5c | `clv.py` | Scores every pick by closing line value: the closing market's fair probability minus the probability implied by the price taken |
+| 5d | `injury_watch.py` | Every 15 minutes, detects rotation players newly ruled out, reruns the model and pushes the teammates' best props to a phone (ntfy, private channel kept in `.env`) |
+| 5e | `game_lines.py` | Compares FanDuel's moneylines, spreads and totals with Pinnacle's no-vig fair prices (shifted along a normal curve when the numbers differ) |
 | 5 | `grade.py` | Grades past projections against actual results (hit rate, profit/loss, by confidence bucket) |
 | 6 | `parlay.py` | Selects the day's highest-confidence picks and tracks a paper bankroll |
 | - | `app.py` | Browser app over all of the above (see below) |

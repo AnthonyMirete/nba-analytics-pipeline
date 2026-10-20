@@ -27,3 +27,7 @@ ml_models.pkl
 
 # Closing-line collector log
 closing_log.txt
+
+# Injury watcher state and log
+injury_watch_state.json
+injury_watch_log.txt

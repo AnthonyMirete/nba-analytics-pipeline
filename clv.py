@@ -113,11 +113,14 @@ def picks_from_model(history):
 
 
 def picks_from_parlays(parlays):
-    p = parlays[parlays["market"].astype(str).str.startswith("player_")].copy()
+    p = parlays[parlays["market"].astype(str).str.startswith("player_")
+                | parlays["market"].isin(["moneyline", "spread"])].copy()
     p["market"] = p["market"].replace(ALIASES)
     p["date"] = game_date(p["tip_time_utc"])
     p["name_key"] = p["player"].map(clean_name)
+    is_game = p["market"].isin(["moneyline", "spread"])
     groups = p["source"].fillna("model").map({"model": "Model parlay legs", "me": "Your NBA prop legs"})
+    groups = groups.where(~is_game, "Your NBA moneyline/spread legs")
     return pd.DataFrame({"group": groups, "date": p["date"], "name_key": p["name_key"], "player": p["player"],
                          "market": p["market"], "line": pd.to_numeric(p["line"], errors="coerce"),
                          "side": p["side"], "price": p["price"]})
@@ -140,11 +143,22 @@ def score():
         picks.append(picks_from_parlays(pd.read_csv(PARLAY_HISTORY)))
     if not picks:
         return pd.DataFrame()
-    picks = pd.concat(picks, ignore_index=True).dropna(subset=["line", "price"])
+    picks = pd.concat(picks, ignore_index=True)
+    is_game = picks["market"].isin(["moneyline", "spread"])
+    picks = picks[(is_game & picks["price"].notna()) | picks[["line", "price"]].notna().all(axis=1)]
     picks = picks[picks["date"].isin(set(closing_rows["date"]))]
     swings = swing_lookup(history)
     rows = []
     for _, p in picks.iterrows():
+        if p["market"] in ("moneyline", "spread"):
+            import game_lines
+            fair_side = game_lines.closing_fair(p["date"], p["player"], p["market"],
+                                                None if pd.isna(p["line"]) else float(p["line"]))
+            if fair_side is None:
+                continue
+            rows.append({**p.to_dict(), "close_fair": fair_side, "price_implied": implied(p["price"]),
+                         "clv": fair_side - implied(p["price"])})
+            continue
         swing = float(swings.get((p["date"], p["name_key"], p["market"]), max(1.5, (p["line"] + 1) ** 0.5)))
         over = fair_close(closing, p["date"], p["name_key"], p["market"], p["line"], max(swing, 0.5))
         if over is None:

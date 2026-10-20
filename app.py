@@ -139,7 +139,7 @@ def slip_html(p):
         f'</div>')
 
 
-PAGES = ["Today", "Log a bet", "Settle", "Records", "Props explorer"]
+PAGES = ["Today", "Game lines", "Log a bet", "Settle", "Records", "Props explorer"]
 st.sidebar.markdown("## NBA Model")
 page = st.sidebar.radio("Go to", PAGES, label_visibility="collapsed")
 last = data.last_run_summary()
@@ -193,6 +193,39 @@ if page == "Today":
     if st.session_state.get("run_output"):
         with st.expander("Details of the last refresh"):
             st.code(st.session_state["run_output"])
+
+
+# ---------------------------------------------------------------------------
+# Game lines
+# ---------------------------------------------------------------------------
+elif page == "Game lines":
+    st.title("Game lines")
+    st.markdown('<p class="note">FanDuel\'s moneylines, spreads and totals next to Pinnacle\'s fair '
+                "chance (its price with the cut removed). Edge is Pinnacle's fair chance minus the chance "
+                "FanDuel's price implies. Around -2 to -3 is normal; positive means FanDuel's price is "
+                "better than fair.</p>", unsafe_allow_html=True)
+    lines = data.game_lines_table()
+    if lines.empty:
+        st.info("No game lines with both FanDuel and Pinnacle prices yet. Download new data from the Today page.")
+    else:
+        best = lines[lines["edge"] > 0]
+        if len(best):
+            st.success(f"{len(best)} FanDuel price(s) better than Pinnacle's fair line right now.")
+        for market in ["Moneyline", "Spread", "Total"]:
+            part = lines[lines["market"] == market].sort_values(["tip", "game"])
+            if part.empty:
+                continue
+            st.subheader(market)
+            st.dataframe(pd.DataFrame({
+                "Game": part["game"], "Tip-off": part["Tip (ET)"], "Bet": part["bet"],
+                "FanDuel": part["price"], "FanDuel %": part["fanduel_chance"] * 100,
+                "Pinnacle fair %": part["fair"] * 100, "Edge": part["edge"] * 100,
+            }), hide_index=True, use_container_width=True, column_config={
+                "FanDuel": st.column_config.NumberColumn(format="%+d"),
+                "FanDuel %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Pinnacle fair %": st.column_config.NumberColumn(format="%.1f%%"),
+                "Edge": st.column_config.NumberColumn("Edge (points)", format="%+.1f"),
+            })
 
 
 # ---------------------------------------------------------------------------
