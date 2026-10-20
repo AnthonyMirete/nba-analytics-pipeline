@@ -31,6 +31,7 @@ Every day at a scheduled time, `daily_run.sh` runs the whole chain:
 | 4 | `simple_model.py` | Projects each player's stat as expected minutes × per-minute rate, adjusted for injured teammates, then blends it with the market consensus |
 | 5 | `grade.py` | Grades past projections against actual results (hit rate, profit/loss, by confidence bucket) |
 | 6 | `parlay.py` | Selects the day's highest-confidence picks and tracks a paper bankroll |
+| - | `app.py` | Browser app over all of the above (see below) |
 
 ## Technical highlights
 
@@ -72,6 +73,19 @@ bash setup_daily.sh           # schedule the daily run (macOS)
 Free API keys: [PropLine](https://prop-line.com) and
 [The Odds API](https://the-odds-api.com). NBA.com stats and injury reports
 need no key.
+
+## App
+
+A local web app (Streamlit) shows today's picks, logs bets with a form,
+settles results, charts both bankrolls and lets you filter every prop:
+
+```bash
+pip3 install streamlit
+streamlit run app.py
+```
+
+All data access lives in `app_data.py`, so the app can later be moved to a
+hosted database without changing the screens.
 
 ## Data sources
 
