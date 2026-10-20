@@ -30,6 +30,8 @@ Every day at a scheduled time, `daily_run.sh` runs the whole chain:
 | 3 | `get_injuries.py` | Finds the newest official NBA injury report (published as a PDF every 15 minutes) and parses it into a table |
 | 4a | `ml_model.py` | Trains gradient-boosted models (scikit-learn) that predict each player's stats from pre-game features, including which teammates are missing |
 | 4 | `simple_model.py` | Projects each player's stat as expected minutes × per-minute rate, adjusted for injured teammates, then blends it with the market consensus |
+| 5b | `closing_lines.py` | Saves every game's prop lines 10-20 minutes before tip-off (runs every 10 minutes) |
+| 5c | `clv.py` | Scores every pick by closing line value: the closing market's fair probability minus the probability implied by the price taken |
 | 5 | `grade.py` | Grades past projections against actual results (hit rate, profit/loss, by confidence bucket) |
 | 6 | `parlay.py` | Selects the day's highest-confidence picks and tracks a paper bankroll |
 | - | `app.py` | Browser app over all of the above (see below) |
@@ -62,6 +64,7 @@ worth 15+ points was out. Reproduce with `python3 ml_model.py --evaluate`.
   each game, so grading isn't contaminated by information from the future.
 - **Market consensus.** Each sportsbook's price is converted to a no-vig
   probability and compared against the average of the other books.
+- **Closing line value.** Picks are scored against the closing market (Pinnacle's no-vig price, or the consensus of other books), the standard that shows an edge within a few hundred picks rather than thousands.
 - **Automated evaluation.** Every projection is logged and later graded, so
   the model is measured on results instead of impressions.
 

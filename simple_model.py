@@ -422,7 +422,7 @@ def main():
 
     columns = ["model_run_utc", "tip_time_utc", "away_team", "home_team", "player",
                "market", "line_type", "bookmaker", "line", "price_over", "price_under",
-               "exp_minutes", "prediction", "formula_prediction", "ml_prediction",
+               "exp_minutes", "prediction", "formula_prediction", "ml_prediction", "swing",
                "teammate_boost", "book_over_chance",
                "market_over_chance", "market_source", "other_books", "model_over_chance", "final_over_chance",
                "difference", "model_leans", "team_changed", "injury_status", "games_this_season",

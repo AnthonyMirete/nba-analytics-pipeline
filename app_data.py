@@ -193,6 +193,18 @@ def tonight_summary():
     return {"games": props["Game"].nunique(), "first_tip": first.strftime("%I:%M %p").lstrip("0")}
 
 
+def clv_summary():
+    """Closing line value per group (model picks, model parlay legs, your prop legs)."""
+    import clv
+    previous = os.getcwd()
+    try:
+        os.chdir(FOLDER)
+        scored = clv.score()
+    finally:
+        os.chdir(previous)
+    return clv.summary(scored)
+
+
 def injuries_today():
     if not os.path.exists(INJURIES_FILE):
         return pd.DataFrame()

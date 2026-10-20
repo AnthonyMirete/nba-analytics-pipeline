@@ -303,6 +303,20 @@ elif page == "Records":
     else:
         st.caption("The bankroll chart appears after the first bets are graded.")
 
+    st.subheader("Closing line value")
+    clv_table = data.clv_summary()
+    if clv_table.empty:
+        st.caption("Appears once picks have closing lines (saved 10-20 minutes before each tip-off).")
+    else:
+        st.dataframe(pd.DataFrame({
+            "Picks": clv_table["group"], "Count": clv_table["picks"],
+            "Average CLV (points)": (clv_table["avg_clv"] * 100).round(1),
+            "Beat the closing line": (clv_table["beat_close"] * 100).round(0).astype(int).astype(str) + "%",
+        }), hide_index=True, use_container_width=True)
+        st.caption("How much better each price was than where the market closed. Positive over a few "
+                   "hundred picks is the clearest early sign of a real edge; FanDuel's own margin "
+                   "means about -3 is where an edge-less pick lands.")
+
     for source, name in [("me", "Your bets"), ("model", "Model's paper parlays")]:
         summary, done = data.record_summary(source)
         st.subheader(name)

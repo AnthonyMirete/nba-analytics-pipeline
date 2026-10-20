@@ -24,3 +24,6 @@ markets_available.json
 
 # Trained machine-learning models (rebuilt daily from the data)
 ml_models.pkl
+
+# Closing-line collector log
+closing_log.txt

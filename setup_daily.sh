@@ -35,6 +35,7 @@ echo "===== \$(date) ====="
 "$PYTHON" ml_model.py
 "$PYTHON" simple_model.py
 "$PYTHON" grade.py
+"$PYTHON" clv.py
 "$PYTHON" parlay.py
 RUNEOF
 
