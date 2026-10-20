@@ -1,0 +1,16 @@
+# Secrets: API keys live here and must never be uploaded
+.env
+
+# Personal data and downloaded data (your bets, prop lines, stats)
+*.csv
+daily_log.txt
+daily_run.sh
+
+# Backups and leftovers
+_backup/
+_to_delete/
+
+# Python and macOS clutter
+__pycache__/
+*.pyc
+.DS_Store
