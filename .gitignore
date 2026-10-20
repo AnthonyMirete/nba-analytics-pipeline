@@ -18,3 +18,9 @@ __pycache__/
 # Raw API sample (for checking the data format)
 raw_props_sample.json
 markets_available.json
+
+# Streamlit secrets (if ever used)
+.streamlit/secrets.toml
+
+# Trained machine-learning models (rebuilt daily from the data)
+ml_models.pkl

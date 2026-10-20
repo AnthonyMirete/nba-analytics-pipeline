@@ -1,0 +1,7 @@
+# Colors for the NBA Model app (court navy, floorboard blue, chalk, basketball orange)
+[theme]
+base = "dark"
+primaryColor = "#F26B1D"
+backgroundColor = "#13233B"
+secondaryBackgroundColor = "#1B2F4D"
+textColor = "#EEF1F4"

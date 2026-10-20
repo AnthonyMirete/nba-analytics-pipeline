@@ -28,10 +28,24 @@ Every day at a scheduled time, `daily_run.sh` runs the whole chain:
 | 1 | `get_stats.py` | Downloads every player's game-by-game box scores (3 seasons) from NBA.com via `nba_api` |
 | 2 | `save_props.py` | Saves the day's player prop lines from several sportsbooks (PropLine API, with The Odds API as a fallback) |
 | 3 | `get_injuries.py` | Finds the newest official NBA injury report (published as a PDF every 15 minutes) and parses it into a table |
+| 4a | `ml_model.py` | Trains gradient-boosted models (scikit-learn) that predict each player's stats from pre-game features, including which teammates are missing |
 | 4 | `simple_model.py` | Projects each player's stat as expected minutes × per-minute rate, adjusted for injured teammates, then blends it with the market consensus |
 | 5 | `grade.py` | Grades past projections against actual results (hit rate, profit/loss, by confidence bucket) |
 | 6 | `parlay.py` | Selects the day's highest-confidence picks and tracks a paper bankroll |
 | - | `app.py` | Browser app over all of the above (see below) |
+
+## Machine-learning model
+
+`ml_model.py` trains one gradient-boosted regressor per stat on three seasons of
+box scores, using only information available before each game: rolling minutes
+and stats, season averages, rest, home/away, opponent defense, and how much
+usual production was missing from the lineup (injured teammates). The final
+projection averages it with the rate-based formula.
+
+Validated by training on 2024-25 and predicting all 26,294 player-games of
+2025-26: the average was 1-3% more accurate than the formula alone on every
+stat (root-mean-square error), and 3% more accurate on points when a teammate
+worth 15+ points was out. Reproduce with `python3 ml_model.py --evaluate`.
 
 ## Technical highlights
 

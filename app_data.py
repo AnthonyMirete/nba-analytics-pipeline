@@ -184,6 +184,15 @@ def todays_props():
     return m
 
 
+def tonight_summary():
+    """Number of upcoming games and the first tip-off time (Eastern), from saved props."""
+    props = todays_props()
+    if props.empty:
+        return {"games": 0, "first_tip": None}
+    first = props["tip_time_utc"].min().tz_convert(EASTERN)
+    return {"games": props["Game"].nunique(), "first_tip": first.strftime("%I:%M %p").lstrip("0")}
+
+
 def injuries_today():
     if not os.path.exists(INJURIES_FILE):
         return pd.DataFrame()

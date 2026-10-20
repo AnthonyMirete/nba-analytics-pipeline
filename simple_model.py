@@ -39,6 +39,11 @@ from datetime import datetime, timezone
 
 import pandas as pd
 
+try:
+    import ml_model                      # needs scikit-learn; the formula alone is used without it
+except ImportError:
+    ml_model = None
+
 PROPS_FILE = "nba_props.csv"
 LOGS_FILE = "player_logs.csv"
 OUTPUT_FILE = "model_output.csv"
@@ -266,6 +271,48 @@ def player_profiles(logs, stat):
     return pd.DataFrame(rows)
 
 
+# Which box-score stats make up each prop (combos are sums).
+MARKET_PARTS = {
+    "player_points": ["PTS"], "player_rebounds": ["REB"], "player_assists": ["AST"],
+    "player_threes": ["FG3M"], "player_steals": ["STL"], "player_blocks": ["BLK"],
+    "player_turnovers": ["TOV"], "player_points_rebounds_assists": ["PTS", "REB", "AST"],
+    "player_points_rebounds": ["PTS", "REB"], "player_points_assists": ["PTS", "AST"],
+    "player_rebounds_assists": ["REB", "AST"],
+}
+
+
+def ml_predictions(logs, lines, injuries):
+    """Machine-learning predictions for tonight's players, keyed by cleaned name (or empty)."""
+    saved = ml_model.load() if ml_model else None
+    if saved is None:
+        print("Machine-learning model not available (run ml_model.py); using the formula only.")
+        return pd.DataFrame()
+    regular = logs[logs["SEASON_TYPE"] == "Regular Season"].sort_values("GAME_DATE")
+    latest = regular.groupby("PLAYER_ID").tail(1).copy()
+    latest["name_key"] = latest["PLAYER_NAME"].map(clean_name)
+    games = lines.drop_duplicates("player")[["player", "home_team", "away_team", "tip_time_utc"]].copy()
+    games["name_key"] = games["player"].map(clean_name)
+    games = games.merge(latest[["name_key", "PLAYER_ID", "TEAM_ABBREVIATION"]], on="name_key")
+    games["home_code"] = games["home_team"].map(TEAM_CODES)
+    games["away_code"] = games["away_team"].map(TEAM_CODES)
+    games = games[(games["TEAM_ABBREVIATION"] == games["home_code"]) | (games["TEAM_ABBREVIATION"] == games["away_code"])]
+    if games.empty:
+        return pd.DataFrame()
+    players = pd.DataFrame({
+        "PLAYER_ID": games["PLAYER_ID"], "team": games["TEAM_ABBREVIATION"],
+        "home": (games["TEAM_ABBREVIATION"] == games["home_code"]).astype(int),
+        "opponent": games["away_code"].where(games["TEAM_ABBREVIATION"] == games["home_code"], games["home_code"]),
+        "game_date": games["tip_time_utc"].dt.tz_convert("America/New_York").dt.tz_localize(None).dt.normalize(),
+    })
+    out_ids = []
+    if len(injuries):
+        out_keys = set(injuries[injuries["status"].isin(OUT_STATUSES)]["name_key"])
+        out_ids = list(latest[latest["name_key"].isin(out_keys)]["PLAYER_ID"])
+    preds = ml_model.predict_tonight(saved, logs, players, out_ids)
+    preds = preds.merge(games[["PLAYER_ID", "name_key"]].drop_duplicates("PLAYER_ID"), on="PLAYER_ID")
+    return preds.drop_duplicates("name_key")
+
+
 def append_history(out):
     """Add today's rows to model_history.csv, even if older runs wrote fewer columns.
 
@@ -301,6 +348,7 @@ def main():
 
     logs = add_combo_stats(pd.read_csv(LOGS_FILE, parse_dates=["GAME_DATE"]))
     injuries = todays_injuries()
+    ml = ml_predictions(logs, lines, injuries)
     results = []
     boost_notes = {}
     for market, stat in MARKET_TO_STAT.items():
@@ -315,6 +363,18 @@ def main():
             boost_notes = {team: (boosts[team], missing[team]) for team in boosts}
         market_lines["name_key"] = market_lines["player"].map(clean_name)
         merged = market_lines.merge(profiles, on="name_key", how="left")
+        merged["formula_prediction"] = merged["prediction"]
+        merged["ml_prediction"] = float("nan")
+        if len(ml):
+            # Final prediction = average of the formula and the machine-learning model
+            # (tested on the 2025-26 season: 1-3% more accurate than the formula alone).
+            parts = ml[["name_key"] + [f"ml_{p}" for p in MARKET_PARTS[market]]]
+            merged = merged.merge(parts, on="name_key", how="left")
+            merged["ml_prediction"] = merged[[f"ml_{p}" for p in MARKET_PARTS[market]]].sum(axis=1, min_count=1)
+            has_ml = merged["ml_prediction"].notna() & merged["prediction"].notna()
+            merged.loc[has_ml, "prediction"] = ((merged.loc[has_ml, "formula_prediction"]
+                                                 + merged.loc[has_ml, "ml_prediction"]) / 2).round(1)
+            merged = merged.drop(columns=[f"ml_{p}" for p in MARKET_PARTS[market]])
 
         unmatched = merged[merged["prediction"].isna()]["player"].unique()
         if len(unmatched):
@@ -362,7 +422,8 @@ def main():
 
     columns = ["model_run_utc", "tip_time_utc", "away_team", "home_team", "player",
                "market", "line_type", "bookmaker", "line", "price_over", "price_under",
-               "exp_minutes", "prediction", "teammate_boost", "book_over_chance",
+               "exp_minutes", "prediction", "formula_prediction", "ml_prediction",
+               "teammate_boost", "book_over_chance",
                "market_over_chance", "market_source", "other_books", "model_over_chance", "final_over_chance",
                "difference", "model_leans", "team_changed", "injury_status", "games_this_season",
                "stats_team", "last_game"]

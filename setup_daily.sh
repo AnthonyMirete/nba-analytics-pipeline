@@ -32,6 +32,7 @@ echo "===== \$(date) ====="
 "$PYTHON" get_stats.py
 "$PYTHON" save_props.py
 "$PYTHON" get_injuries.py
+"$PYTHON" ml_model.py
 "$PYTHON" simple_model.py
 "$PYTHON" grade.py
 "$PYTHON" parlay.py
