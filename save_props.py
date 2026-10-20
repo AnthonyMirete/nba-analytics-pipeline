@@ -15,6 +15,7 @@ If a PropLine key is filled in below, PropLine is used.
 """
 
 import csv
+import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -34,11 +35,16 @@ API_KEY = get_secret("ODDS_API_KEY")   # used only if there is no PropLine key
 
 # Markets for each source. PropLine charges one request per game whatever
 # the markets, so it can take all four.
-PROPLINE_MARKETS = ["player_points", "player_rebounds", "player_assists", "player_threes"]
+PROPLINE_MARKETS = [
+    "player_points", "player_rebounds", "player_assists", "player_threes",
+    "player_points_rebounds_assists", "player_points_rebounds", "player_points_assists",
+    "player_rebounds_assists", "player_blocks", "player_steals", "player_turnovers",
+]
 ODDS_API_MARKETS = ["player_points"]
 ODDS_API_BOOKMAKERS = ["draftkings", "fanduel", "betmgm"]
 
 OUTPUT_FILE = "nba_props.csv"
+RAW_SAMPLE_FILE = "raw_props_sample.json"   # one raw API answer, kept for checking the format
 
 # ---------------------------------------------------------------------------
 # The code below does the work. You don't need to change it.
@@ -95,6 +101,24 @@ def get_props_for_game(source, key, game_id):
     return response.json(), left
 
 
+def period_of(market, outcome):
+    """Which part of the game a line is for (full game, 1st quarter, 1st half...).
+
+    Some sources send first-quarter and first-half props under the same
+    market name as full-game props, labelled with a 'period' field.
+    """
+    for source in (outcome, market):
+        for field in ("period", "game_period", "segment"):
+            value = source.get(field)
+            if value not in (None, ""):
+                return str(value)
+    key = market.get("key", "")
+    for tag in ("_q1", "_q2", "_q3", "_q4", "_h1", "_h2", "_1q", "_1h"):
+        if key.endswith(tag):
+            return tag.strip("_")
+    return ""
+
+
 def flatten(game, game_data, captured_at):
     """Turn the nested answer into simple rows: one row per player/book/side."""
     rows = []
@@ -115,13 +139,32 @@ def flatten(game, game_data, captured_at):
                     "side": outcome.get("name", ""),
                     "line": outcome.get("point", ""),
                     "price": outcome.get("price", ""),
+                    "period": period_of(market, outcome),
+                    "line_type": market.get("line_type") or "",   # main / alternate / milestone
                 })
     return rows
+
+
+def upgrade_old_file(fieldnames):
+    """If nba_props.csv was written before a column was added, add it (empty) to old rows."""
+    if not os.path.exists(OUTPUT_FILE):
+        return
+    with open(OUTPUT_FILE, newline="") as f:
+        reader = csv.DictReader(f)
+        if reader.fieldnames == fieldnames:
+            return
+        old_rows = list(reader)
+    with open(OUTPUT_FILE, "w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in old_rows:
+            writer.writerow({name: row.get(name, "") for name in fieldnames})
 
 
 def save_rows(rows):
     if not rows:
         return
+    upgrade_old_file(list(rows[0].keys()))
     file_is_new = not os.path.exists(OUTPUT_FILE)
     with open(OUTPUT_FILE, "a", newline="") as f:
         writer = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
@@ -144,6 +187,9 @@ def main():
     total_rows, left = 0, "?"
     for game in games:
         data, left = get_props_for_game(source, key, game["id"])
+        if game is games[0]:
+            with open(RAW_SAMPLE_FILE, "w") as f:
+                json.dump(data, f, indent=1)
         rows = flatten(game, data, captured_at)
         save_rows(rows)
         total_rows += len(rows)

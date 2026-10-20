@@ -54,6 +54,10 @@ MARKET_TO_STAT = {
     "player_points_rebounds": "PR",
     "player_points_assists": "PA",
     "player_rebounds_assists": "RA",
+    "player_points_rebounds_assists": "PRA",   # PropLine's name for PRA
+    "player_blocks": "BLK",
+    "player_steals": "STL",
+    "player_turnovers": "TOV",
 }
 
 # Injury statuses that keep a player out of the model's parlays.
@@ -90,6 +94,8 @@ def candidate_legs():
     model["tip_time_utc"] = pd.to_datetime(model["tip_time_utc"], utc=True)
     model = model[model["tip_time_utc"] > datetime.now(timezone.utc)]
     model = model[model["bookmaker"] == PARLAY_BOOK]
+    if "line_type" in model.columns:                    # main lines only: alternates cost more
+        model = model[model["line_type"].fillna("").isin(["", "main"])]
     model = model[~model["team_changed"].astype(str).str.lower().eq("true")]
     if "injury_status" in model.columns:
         model = model[~model["injury_status"].fillna("").isin(SKIP_STATUSES)]

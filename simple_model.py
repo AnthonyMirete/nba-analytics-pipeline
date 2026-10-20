@@ -16,9 +16,10 @@ What it does:
      report (from get_injuries.py) are left out too.
   5. Teammates out: when a rotation player is Out, his usual points (or
      rebounds, assists) are shared among his healthy teammates.
-  6. Market check: each sportsbook's price is compared with the average of
-     the OTHER sportsbooks. The final chance mixes that market average with
-     the model, so a book that's out of line with everyone else stands out.
+  6. Market check: each sportsbook's price is compared with Pinnacle (the
+     sharpest book) at the same line, or with the average of the other books
+     when Pinnacle doesn't have that line. The final chance mixes that market
+     view with the model, so a book that's out of line stands out.
 
 Run it after get_stats.py:
     python3 simple_model.py
@@ -30,6 +31,7 @@ check how the model did.
 Still a learning model: it ignores opponents and rest. Don't bet on it.
 """
 
+import csv
 import math
 import os
 import unicodedata
@@ -49,9 +51,13 @@ TRUST_GAMES = 8          # after 8 games this season, this season and last seaso
 MIN_GAMES = 5            # skip players with fewer total games than this
 SHOW_TOP = 15            # how many disagreements to print
 
-MARKET_WEIGHT = 0.7      # final chance = 70% market average + 30% model
+MARKET_WEIGHT = 0.7      # final chance = 70% market (Pinnacle or average) + 30% model
+SHARP_BOOK = "pinnacle"
+MAX_MARGIN = 0.15        # drop lines whose Over + Under add up to more than a 15% bookmaker margin
+                         # (exchange quotes like Over -330 / Under -225 aren't a real market)
 SHARE_RECOVERED = 0.6    # teammates pick up 60% of an injured player's usual stat (to be tuned with real results)
 OUT_STATUSES = {"Out", "Doubtful"}
+FULL_GAME_PERIODS = {"", "full", "full_game", "fullgame", "game", "fg", "ft", "match", "nan"}
 
 # Pick'em sites post fake "+100 / +100" prices, so they're left out of the market average.
 NOT_REAL_PRICES = {"prizepicks", "underdog", "sleeper", "dabble", "betr", "parlayplay",
@@ -62,7 +68,23 @@ MARKET_TO_STAT = {
     "player_rebounds": "REB",
     "player_assists": "AST",
     "player_threes": "FG3M",
+    "player_points_rebounds_assists": "PRA",
+    "player_points_rebounds": "PR",
+    "player_points_assists": "PA",
+    "player_rebounds_assists": "RA",
+    "player_blocks": "BLK",
+    "player_steals": "STL",
+    "player_turnovers": "TOV",
 }
+
+def add_combo_stats(logs):
+    """Combo props (PRA, P+R, P+A, R+A) are sums of the box-score stats."""
+    logs["PRA"] = logs["PTS"] + logs["REB"] + logs["AST"]
+    logs["PR"] = logs["PTS"] + logs["REB"]
+    logs["PA"] = logs["PTS"] + logs["AST"]
+    logs["RA"] = logs["REB"] + logs["AST"]
+    return logs
+
 
 # The odds site uses full team names; NBA.com uses three-letter codes.
 TEAM_CODES = {
@@ -111,12 +133,20 @@ def latest_lines():
     now = datetime.now(timezone.utc)
     props = props[props["tip_time_utc"] > now]          # only games that haven't started
     props = props[props["market"].isin(MARKET_TO_STAT)]
+    # Full-game lines only: first-quarter / first-half props would be compared
+    # with full-game predictions and look like huge (fake) edges.
+    if "period" in props.columns:
+        period = props["period"].fillna("").astype(str).str.lower().str.strip()
+        props = props[period.isin(FULL_GAME_PERIODS)]
 
     newest = props.groupby("game_id")["captured_at_utc"].transform("max")
     props = props[props["captured_at_utc"] == newest]
 
+    if "line_type" not in props.columns:
+        props["line_type"] = ""
+    props["line_type"] = props["line_type"].fillna("").astype(str)
     keys = ["game_id", "tip_time_utc", "home_team", "away_team",
-            "bookmaker", "market", "player"]
+            "bookmaker", "market", "player", "line_type"]
     over = props[props["side"] == "Over"][keys + ["line", "price"]]
     under = props[props["side"] == "Under"][keys + ["line", "price"]]
     return over.merge(under, on=keys + ["line"], suffixes=("_over", "_under"))
@@ -172,8 +202,17 @@ def market_average(out):
     own_is_real = ~merged["bookmaker"].isin(NOT_REAL_PRICES)
     others_sum = merged["sum"] - merged["book_over_chance"].where(own_is_real, 0)
     others_count = merged["count"] - own_is_real.astype(int)
-    average = others_sum / others_count
-    return average.where(others_count > 0).values, others_count.fillna(0).astype(int).values
+    average = (others_sum / others_count).where(others_count > 0)
+
+    # Pinnacle at the same line, when it has one (and the row isn't Pinnacle itself).
+    sharp = out[out["bookmaker"] == SHARP_BOOK][keys + ["book_over_chance"]]
+    sharp = sharp.drop_duplicates(keys).rename(columns={"book_over_chance": "sharp"})
+    merged = merged.merge(sharp, on=keys, how="left")
+    use_sharp = merged["sharp"].notna() & (merged["bookmaker"] != SHARP_BOOK)
+    market = merged["sharp"].where(use_sharp, average)
+    source = pd.Series("average", index=merged.index).where(~use_sharp, "pinnacle")
+    source = source.where(market.notna(), "")
+    return market.values, others_count.fillna(0).astype(int).values, source.values
 
 
 def blend(current_value, current_games, prior_value):
@@ -227,13 +266,40 @@ def player_profiles(logs, stat):
     return pd.DataFrame(rows)
 
 
+def append_history(out):
+    """Add today's rows to model_history.csv, even if older runs wrote fewer columns.
+
+    Each model version added columns. Rows from older versions are lined up by
+    column name (missing columns left empty) so the file stays readable.
+    """
+    if not os.path.exists(HISTORY_FILE):
+        out.to_csv(HISTORY_FILE, index=False)
+        return
+    with open(HISTORY_FILE, newline="") as f:
+        rows = list(csv.reader(f))
+    header, body = rows[0], rows[1:]
+    columns = list(out.columns)
+    if header == columns and all(len(r) == len(header) for r in body):
+        out.to_csv(HISTORY_FILE, mode="a", index=False, header=False)
+        return
+    layouts = {len(header): header, len(columns): columns}
+    parts = [pd.DataFrame([r for r in body if len(r) == width], columns=names)
+             for width, names in layouts.items() if any(len(r) == width for r in body)]
+    unreadable = sum(1 for r in body if len(r) not in layouts)
+    if unreadable:
+        print(f"Note: {unreadable} old rows in {HISTORY_FILE} had an unknown layout and were dropped.")
+    merged = pd.concat(parts + [out.astype(str)], ignore_index=True)
+    merged = merged[columns + [c for c in merged.columns if c not in columns]]
+    merged.to_csv(HISTORY_FILE, index=False)
+
+
 def main():
     lines = latest_lines()
     if lines.empty:
         print("No upcoming props found in nba_props.csv. Run save_props.py before tip-off.")
         return
 
-    logs = pd.read_csv(LOGS_FILE, parse_dates=["GAME_DATE"])
+    logs = add_combo_stats(pd.read_csv(LOGS_FILE, parse_dates=["GAME_DATE"]))
     injuries = todays_injuries()
     results = []
     boost_notes = {}
@@ -274,13 +340,20 @@ def main():
 
     p_over = out["price_over"].map(american_to_prob)
     p_under = out["price_under"].map(american_to_prob)
+    margin = p_over + p_under - 1
+    junk = margin > MAX_MARGIN
+    if junk.any():
+        print(f"Ignored {junk.sum()} lines whose prices don't form a real two-way market "
+              f"(margin over {MAX_MARGIN:.0%}), mostly from: "
+              f"{', '.join(out[junk]['bookmaker'].value_counts().head(3).index)}")
+    out, p_over, p_under = out[~junk].copy(), p_over[~junk], p_under[~junk]
     out["book_over_chance"] = p_over / (p_over + p_under)
     out["model_over_chance"] = [
         chance_over(line, mean, swing)
         for line, mean, swing in zip(out["line"], out["prediction"], out["swing"])
     ]
     # Market check: what do the other sportsbooks say at the same line?
-    out["market_over_chance"], out["other_books"] = market_average(out)
+    out["market_over_chance"], out["other_books"], out["market_source"] = market_average(out)
     market = out["market_over_chance"].fillna(out["book_over_chance"])
     out["final_over_chance"] = MARKET_WEIGHT * market + (1 - MARKET_WEIGHT) * out["model_over_chance"]
     out["difference"] = out["final_over_chance"] - out["book_over_chance"]
@@ -288,18 +361,19 @@ def main():
     out["model_run_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
     columns = ["model_run_utc", "tip_time_utc", "away_team", "home_team", "player",
-               "market", "bookmaker", "line", "price_over", "price_under",
+               "market", "line_type", "bookmaker", "line", "price_over", "price_under",
                "exp_minutes", "prediction", "teammate_boost", "book_over_chance",
-               "market_over_chance", "other_books", "model_over_chance", "final_over_chance",
+               "market_over_chance", "market_source", "other_books", "model_over_chance", "final_over_chance",
                "difference", "model_leans", "team_changed", "injury_status", "games_this_season",
                "stats_team", "last_game"]
     out = out[columns].sort_values("difference", key=abs, ascending=False)
     out["last_game"] = pd.to_datetime(out["last_game"]).dt.date
     out.to_csv(OUTPUT_FILE, index=False)
-    out.to_csv(HISTORY_FILE, mode="a", index=False, header=not os.path.exists(HISTORY_FILE))
+    append_history(out)
 
     hurt = out["injury_status"].isin(["Out", "Doubtful", "Questionable"])
-    trusted = out[~out["team_changed"] & ~hurt]
+    trusted = out[~out["team_changed"] & ~hurt & out["line_type"].isin(["", "main"])
+                  & ~out["bookmaker"].isin(NOT_REAL_PRICES)]
     changed = out[out["team_changed"]]["player"].unique()
     injured = out[hurt].drop_duplicates("player")
 
@@ -319,13 +393,21 @@ def main():
     show = trusted.head(SHOW_TOP).copy()
     show["book"] = (show["book_over_chance"] * 100).round(0).astype(int).astype(str) + "%"
     show["model"] = (show["model_over_chance"] * 100).round(0).astype(int).astype(str) + "%"
-    show["market"] = (show["market_over_chance"] * 100).round(0).map(
+    show["mkt"] = (show["market_over_chance"] * 100).round(0).map(
         lambda v: "-" if pd.isna(v) else f"{int(v)}%")
     show["final"] = (show["final_over_chance"] * 100).round(0).astype(int).astype(str) + "%"
-    print(show[["player", "bookmaker", "line", "prediction", "book", "market",
-                "model", "final", "model_leans"]].to_string(index=False))
-    print("\nAll % = chance of going Over. book = this sportsbook; market = average of the other "
-          "sportsbooks;\nmodel = our prediction; final = 70% market + 30% model.")
+    show["stat"] = show["market"].map({
+        "player_points": "pts", "player_rebounds": "reb", "player_assists": "ast",
+        "player_threes": "3pm", "player_points_rebounds_assists": "pra",
+        "player_points_rebounds": "p+r", "player_points_assists": "p+a",
+        "player_rebounds_assists": "r+a", "player_blocks": "blk", "player_steals": "stl",
+        "player_turnovers": "tov"})
+    show["type"] = show["line_type"].replace({"alternate": "alt", "": "main"})
+    show["vs"] = show["market_source"].replace({"pinnacle": "pinn", "average": "avg"})
+    print(show[["player", "stat", "type", "bookmaker", "line", "prediction", "book", "mkt",
+                "vs", "model", "final", "model_leans"]].to_string(index=False))
+    print("\nAll % = chance of going Over. book = this sportsbook; mkt = Pinnacle (vs pinn) or the "
+          "average of the other books (vs avg);\nmodel = our prediction; final = 70% market + 30% model.")
     print(f"Full list in {OUTPUT_FILE}.")
     print("Reminder: this is a learning model. Don't bet on these.")
 

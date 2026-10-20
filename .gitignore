@@ -14,3 +14,7 @@ _to_delete/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Raw API sample (for checking the data format)
+raw_props_sample.json
+markets_available.json

@@ -27,7 +27,23 @@ MARKET_TO_STAT = {
     "player_rebounds": "REB",
     "player_assists": "AST",
     "player_threes": "FG3M",
+    "player_points_rebounds_assists": "PRA",
+    "player_points_rebounds": "PR",
+    "player_points_assists": "PA",
+    "player_rebounds_assists": "RA",
+    "player_blocks": "BLK",
+    "player_steals": "STL",
+    "player_turnovers": "TOV",
 }
+
+def add_combo_stats(logs):
+    """Combo props (PRA, P+R, P+A, R+A) are sums of the box-score stats."""
+    logs["PRA"] = logs["PTS"] + logs["REB"] + logs["AST"]
+    logs["PR"] = logs["PTS"] + logs["REB"]
+    logs["PA"] = logs["PTS"] + logs["AST"]
+    logs["RA"] = logs["REB"] + logs["AST"]
+    return logs
+
 
 
 def clean_name(name):
@@ -77,7 +93,7 @@ def main():
     history["game_date"] = history["tip_time_utc"].dt.tz_convert("America/New_York").dt.date
     history["name_key"] = history["player"].map(clean_name)
 
-    logs = pd.read_csv(LOGS_FILE, parse_dates=["GAME_DATE"])
+    logs = add_combo_stats(pd.read_csv(LOGS_FILE, parse_dates=["GAME_DATE"]))
     logs["game_date"] = logs["GAME_DATE"].dt.date
     logs["name_key"] = logs["PLAYER_NAME"].map(clean_name)
 
